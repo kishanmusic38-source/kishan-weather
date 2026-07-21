@@ -1,152 +1,352 @@
-# -*- coding: utf-8 -*-
+# ============================================================
+# KISHANSKY OBSERVATORY
+# REAL-TIME SATELLITE TRACKING ENGINE
+# ============================================================
 
-import streamlit as st
+!pip -q install skyfield pandas requests
+
+from IPython.display import HTML, display
 import json
-import random
+import time
+import math
+import requests
+import pandas as pd
 
-st.set_page_config(
-    page_title="KISHANSKY OBSERVATORY",
-    layout="wide"
+from skyfield.api import load, EarthSatellite, Topos
+
+
+# ============================================================
+# 1. REAL OBSERVER LOCATION
+# ============================================================
+
+OBSERVER_LATITUDE = 41.7606
+OBSERVER_LONGITUDE = -88.1537
+OBSERVER_ELEVATION_M = 220
+
+
+# ============================================================
+# 2. SKYFIELD TIME + OBSERVER
+# ============================================================
+
+ts = load.timescale()
+
+observer = Topos(
+    latitude_degrees=OBSERVER_LATITUDE,
+    longitude_degrees=OBSERVER_LONGITUDE,
+    elevation_m=OBSERVER_ELEVATION_M
 )
 
-# ---------------------------------------------------------
-# LOAD DATA
-# ---------------------------------------------------------
 
-try:
-    planet_data = planet_df.to_dict(orient="records")
-except:
-    planet_data = []
+# ============================================================
+# 3. LOAD REAL SATELLITES FROM CELESTRAK
+# ============================================================
 
-try:
-    satellite_data = satellite_df.to_dict(orient="records")
-except:
-    satellite_data = []
+# Active satellite group.
+# This avoids downloading unnecessary data repeatedly.
+CELESTRAK_URL = (
+    "https://celestrak.org/NORAD/elements/"
+    "gp.php?GROUP=active&FORMAT=TLE"
+)
 
-# ---------------------------------------------------------
-# NORMALIZE DATA
-# ---------------------------------------------------------
+print("Downloading current orbital elements...")
 
-def normalize_object(obj, default_type):
+response = requests.get(
+    CELESTRAK_URL,
+    timeout=30
+)
 
-    name = (
-        obj.get("name")
-        or obj.get("Name")
-        or obj.get("OBJECT_NAME")
-        or obj.get("object_name")
-        or "Unknown Object"
-    )
+response.raise_for_status()
 
-    altitude = (
-        obj.get("altitude")
-        or obj.get("Altitude")
-        or obj.get("ALTITUDE")
-        or 0
-    )
+tle_lines = response.text.strip().splitlines()
 
-    azimuth = (
-        obj.get("azimuth")
-        or obj.get("Azimuth")
-        or obj.get("AZIMUTH")
-        or 0
-    )
+satellite_objects = []
 
-    distance = (
-        obj.get("distance")
-        or obj.get("Distance")
-        or obj.get("DISTANCE")
-        or 0
-    )
+for i in range(0, len(tle_lines) - 2, 3):
+
+    name = tle_lines[i].strip()
+    line1 = tle_lines[i + 1].strip()
+    line2 = tle_lines[i + 2].strip()
 
     try:
-        altitude = float(altitude)
-    except:
-        altitude = 45
+
+        sat = EarthSatellite(
+            line1,
+            line2,
+            name,
+            ts
+        )
+
+        satellite_objects.append(sat)
+
+    except Exception as error:
+
+        print(
+            "Could not load:",
+            name,
+            error
+        )
+
+
+print(
+    "Loaded real satellites:",
+    len(satellite_objects)
+)
+
+
+# ============================================================
+# 4. REAL PLANET DATA
+# ============================================================
+
+planets_kernel = load("de421.bsp")
+
+earth = planets_kernel["earth"]
+sun = planets_kernel["sun"]
+moon = planets_kernel["moon"]
+
+planet_bodies = {
+
+    "Sun": sun,
+    "Moon": moon,
+
+}
+
+
+# ============================================================
+# 5. CALCULATE REAL SATELLITE POSITION
+# ============================================================
+
+def calculate_satellite_position(satellite, t):
 
     try:
-        azimuth = float(azimuth)
-    except:
-        azimuth = random.uniform(0, 360)
 
-    try:
-        distance = float(distance)
-    except:
-        distance = 0
+        difference = satellite - observer
 
-    return {
-        "name": str(name),
-        "type": obj.get("type", default_type),
-        "altitude": altitude,
-        "azimuth": azimuth,
-        "distance": distance
-    }
+        topocentric = difference.at(t)
 
+        altitude, azimuth, distance = (
+            topocentric.altaz()
+        )
 
-planets = [
-    normalize_object(obj, "Planet")
-    for obj in planet_data
-]
+        return {
 
-satellites = [
-    normalize_object(obj, "Satellite")
-    for obj in satellite_data
-]
+            "name": satellite.name,
 
-# ---------------------------------------------------------
-# DEMO OBJECTS IF DATA IS EMPTY
-# ---------------------------------------------------------
-
-if len(planets) == 0:
-
-    planets = [
-        {
-            "name": "Mars",
-            "type": "Planet",
-            "altitude": 45,
-            "azimuth": 30,
-            "distance": 225000000
-        },
-        {
-            "name": "Jupiter",
-            "type": "Planet",
-            "altitude": 60,
-            "azimuth": 130,
-            "distance": 700000000
-        },
-        {
-            "name": "Saturn",
-            "type": "Planet",
-            "altitude": 35,
-            "azimuth": 240,
-            "distance": 1300000000
-        }
-    ]
-
-if len(satellites) == 0:
-
-    satellites = [
-        {
-            "name": "ISS",
             "type": "Satellite",
-            "altitude": 50,
-            "azimuth": 90,
-            "distance": 420
-        },
-        {
-            "name": "STARLINK",
-            "type": "Satellite",
-            "altitude": 25,
-            "azimuth": 200,
-            "distance": 550
+
+            "altitude": altitude.degrees,
+
+            "azimuth": azimuth.degrees,
+
+            "distance": distance.km,
+
+            "norad_id": (
+                satellite.model.satnum
+            ),
+
         }
-    ]
 
-planets_json = json.dumps(planets)
-satellites_json = json.dumps(satellites)
+    except Exception:
 
-# ---------------------------------------------------------
-# HTML APPLICATION
-# ---------------------------------------------------------
+        return None
+
+
+# ============================================================
+# 6. CALCULATE REAL PLANET POSITIONS
+# ============================================================
+
+def calculate_planet_position(body, name, t):
+
+    try:
+
+        astrometric = (
+            earth
+            + observer
+        ).at(t).observe(body)
+
+        apparent = astrometric.apparent()
+
+        altitude, azimuth, distance = (
+            apparent.altaz()
+        )
+
+        return {
+
+            "name": name,
+
+            "type": "Planet",
+
+            "altitude": altitude.degrees,
+
+            "azimuth": azimuth.degrees,
+
+            "distance": distance.au * 149597870.7,
+
+        }
+
+    except Exception:
+
+        return None
+
+
+# ============================================================
+# 7. CALCULATE EVERYTHING AT A TIME
+# ============================================================
+
+def calculate_all_objects(t):
+
+    satellites = []
+
+    for satellite in satellite_objects:
+
+        result = calculate_satellite_position(
+            satellite,
+            t
+        )
+
+        if result:
+
+            satellites.append(result)
+
+
+    planets = []
+
+    for name, body in planet_bodies.items():
+
+        result = calculate_planet_position(
+            body,
+            name,
+            t
+        )
+
+        if result:
+
+            planets.append(result)
+
+
+    return planets, satellites
+
+
+# ============================================================
+# 8. ORBIT TRAILS
+# ============================================================
+
+def calculate_orbit_trail(
+    satellite,
+    center_time,
+    minutes=45,
+    points=60
+):
+
+    trail = []
+
+    start_seconds = (
+        -minutes * 60
+    )
+
+    end_seconds = (
+        minutes * 60
+    )
+
+    for i in range(points):
+
+        fraction = i / (
+            points - 1
+        )
+
+        seconds = (
+            start_seconds
+            + fraction
+            * (
+                end_seconds
+                - start_seconds
+            )
+        )
+
+        trail_time = ts.utc(
+            center_time.utc_datetime()
+            .timestamp()
+            + seconds
+        )
+
+        result = (
+            calculate_satellite_position(
+                satellite,
+                trail_time
+            )
+        )
+
+        if result:
+
+            trail.append(result)
+
+
+    return trail
+
+
+# ============================================================
+# 9. INITIAL DATA
+# ============================================================
+
+current_time = ts.now()
+
+planet_data, satellite_data = (
+    calculate_all_objects(
+        current_time
+    )
+)
+
+
+# Only create trails for visible satellites
+# to prevent the browser from rendering
+# thousands of unnecessary orbit lines.
+
+orbit_trails = []
+
+for satellite in satellite_objects[:500]:
+
+    position = calculate_satellite_position(
+        satellite,
+        current_time
+    )
+
+    if position and position["altitude"] > 0:
+
+        trail = calculate_orbit_trail(
+            satellite,
+            current_time,
+            minutes=45,
+            points=50
+        )
+
+        orbit_trails.append({
+
+            "name": satellite.name,
+
+            "trail": trail
+
+        })
+
+
+# ============================================================
+# 10. SEND DATA TO JAVASCRIPT
+# ============================================================
+
+planet_json = json.dumps(
+    planet_data
+)
+
+satellite_json = json.dumps(
+    satellite_data
+)
+
+orbit_json = json.dumps(
+    orbit_trails
+)
+
+
+# ============================================================
+# 11. STELLARIUM-STYLE APPLICATION
+# ============================================================
 
 app = f"""
 
@@ -158,9 +358,17 @@ app = f"""
 
 <meta charset="UTF-8">
 
+<title>Kishansky Observatory</title>
+
+
 <style>
 
-html, body {{
+* {{
+    box-sizing: border-box;
+}}
+
+html,
+body {{
 
     margin: 0;
 
@@ -168,33 +376,39 @@ html, body {{
 
     overflow: hidden;
 
-    background: black;
+    background: #020617;
+
+    color: white;
+
+    font-family:
+        Arial,
+        sans-serif;
 
 }}
 
 #app {{
 
-    position: relative;
-
     width: 100vw;
 
     height: 850px;
+
+    position: relative;
 
     overflow: hidden;
 
     background:
 
-    radial-gradient(
+        radial-gradient(
 
-        circle at center,
+            circle at center,
 
-        #172554 0%,
+            #111827 0%,
 
-        #020617 45%,
+            #020617 55%,
 
-        #000000 100%
+            #000 100%
 
-    );
+        );
 
 }}
 
@@ -202,9 +416,7 @@ html, body {{
 
     position: absolute;
 
-    left: 0;
-
-    top: 0;
+    inset: 0;
 
     width: 100%;
 
@@ -220,29 +432,75 @@ html, body {{
 
 }}
 
-#title {{
+#topbar {{
 
     position: absolute;
 
-    top: 20px;
+    top: 0;
 
-    left: 25px;
+    left: 0;
 
-    color: white;
+    right: 0;
 
-    font-family: Arial;
+    height: 60px;
 
-    font-size: 25px;
+    padding: 15px 22px;
 
-    font-weight: bold;
+    background:
+
+        linear-gradient(
+
+            rgba(0,0,0,.85),
+
+            rgba(0,0,0,.35)
+
+        );
 
     z-index: 10;
 
-    text-shadow:
+}}
 
-        0 0 10px #38bdf8,
+#title {{
 
-        0 0 20px #38bdf8;
+    font-size: 22px;
+
+    font-weight: bold;
+
+    display: inline-block;
+
+}}
+
+#clock {{
+
+    margin-left: 25px;
+
+    font-size: 14px;
+
+    color: #cbd5e1;
+
+}}
+
+#search {{
+
+    position: absolute;
+
+    top: 15px;
+
+    right: 22px;
+
+    width: 250px;
+
+    padding: 10px 14px;
+
+    border-radius: 8px;
+
+    border: 1px solid #475569;
+
+    background: rgba(15,23,42,.9);
+
+    color: white;
+
+    outline: none;
 
 }}
 
@@ -250,29 +508,31 @@ html, body {{
 
     position: absolute;
 
-    right: 25px;
+    right: 22px;
 
-    top: 75px;
+    top: 85px;
 
-    width: 280px;
+    width: 300px;
 
-    padding: 20px;
+    padding: 18px;
 
-    color: white;
+    background:
 
-    background: rgba(0,0,0,.88);
+        rgba(2,6,23,.92);
 
-    border: 1px solid #64748b;
+    border:
 
-    border-radius: 15px;
+        1px solid #475569;
 
-    font-family: Arial;
+    border-radius: 12px;
 
     display: none;
 
-    z-index: 20;
+    z-index: 10;
 
-    box-shadow: 0 0 30px rgba(255,255,255,.25);
+    box-shadow:
+
+        0 10px 40px rgba(0,0,0,.5);
 
 }}
 
@@ -280,7 +540,7 @@ html, body {{
 
     margin-top: 0;
 
-    color: #7dd3fc;
+    font-size: 19px;
 
 }}
 
@@ -288,31 +548,45 @@ html, body {{
 
     position: absolute;
 
-    bottom: 25px;
-
     left: 50%;
+
+    bottom: 20px;
 
     transform: translateX(-50%);
 
-    z-index: 20;
+    display: flex;
+
+    align-items: center;
+
+    gap: 6px;
+
+    padding: 10px;
+
+    background:
+
+        rgba(2,6,23,.9);
+
+    border:
+
+        1px solid #475569;
+
+    border-radius: 12px;
+
+    z-index: 10;
 
 }}
 
 button {{
 
-    padding: 11px 20px;
+    padding: 9px 13px;
 
-    margin: 5px;
+    border-radius: 7px;
 
-    border-radius: 8px;
-
-    border: 1px solid #64748b;
+    border: 1px solid #475569;
 
     background: #1e293b;
 
     color: white;
-
-    font-size: 14px;
 
     cursor: pointer;
 
@@ -324,123 +598,259 @@ button:hover {{
 
 }}
 
+#status {{
+
+    position: absolute;
+
+    left: 20px;
+
+    bottom: 20px;
+
+    padding: 9px 12px;
+
+    border-radius: 8px;
+
+    background: rgba(0,0,0,.7);
+
+    color: #cbd5e1;
+
+    font-size: 12px;
+
+    z-index: 10;
+
+}}
+
 </style>
 
 </head>
 
+
 <body>
+
 
 <div id="app">
 
+
 <canvas id="sky"></canvas>
 
-<div id="title">
 
-🌌 KISHANSKY OBSERVATORY
+<div id="topbar">
+
+    <div id="title">
+
+        🌌 KISHANSKY OBSERVATORY
+
+    </div>
+
+    <span id="clock"></span>
+
+    <input
+
+        id="search"
+
+        placeholder="Search satellite or planet..."
+
+    >
 
 </div>
+
 
 <div id="info">
 
-<h2 id="name">
+    <h2 id="objectName">
 
-Selected Object
+        Selected Object
 
-</h2>
+    </h2>
 
-<p>
+    <p>
 
-Type:
+        Type:
 
-<span id="type"></span>
+        <span id="objectType"></span>
 
-</p>
+    </p>
 
-<p>
+    <p>
 
-Altitude:
+        Altitude:
 
-<span id="altitude"></span>
+        <span id="objectAltitude"></span>
 
-</p>
+    </p>
 
-<p>
+    <p>
 
-Azimuth:
+        Azimuth:
 
-<span id="azimuth"></span>
+        <span id="objectAzimuth"></span>
 
-</p>
+    </p>
 
-<p>
+    <p>
 
-Distance:
+        Distance:
 
-<span id="distance"></span>
+        <span id="objectDistance"></span>
 
-</p>
+    </p>
 
 </div>
+
+
+<div id="status">
+
+    Live orbital propagation active
+
+</div>
+
 
 <div id="controls">
 
-<button onclick="zoomIn()">
+    <button onclick="zoomIn()">
 
-Zoom In
+        +
 
-</button>
+    </button>
 
-<button onclick="zoomOut()">
+    <button onclick="zoomOut()">
 
-Zoom Out
+        −
 
-</button>
+    </button>
 
-<button onclick="resetView()">
+    <button onclick="resetView()">
 
-Reset View
+        Reset
 
-</button>
+    </button>
+
+    <button onclick="toggleTime()">
+
+        Pause
+
+    </button>
+
+    <button onclick="changeSpeed(-1)">
+
+        Slower
+
+    </button>
+
+    <button onclick="changeSpeed(1)">
+
+        Faster
+
+    </button>
 
 </div>
 
+
 </div>
+
 
 <script>
 
 
-// ---------------------------------------------------------
+// ============================================================
+// DATA
+// ============================================================
+
+const planets = {planet_json};
+
+const satellites = {satellite_json};
+
+const orbitTrails = {orbit_json};
+
+
+let objects = [
+
+    ...planets,
+
+    ...satellites
+
+];
+
+
+// ============================================================
 // CANVAS
-// ---------------------------------------------------------
+// ============================================================
 
 const canvas =
 
-document.getElementById("sky");
+    document.getElementById(
+
+        "sky"
+
+    );
+
 
 const ctx =
 
-canvas.getContext("2d");
+    canvas.getContext(
+
+        "2d"
+
+    );
+
 
 let width =
 
-window.innerWidth;
+    window.innerWidth;
+
 
 let height =
 
-850;
-
-canvas.width =
-
-width;
-
-canvas.height =
-
-height;
+    850;
 
 
-// ---------------------------------------------------------
-// APPLICATION STATE
-// ---------------------------------------------------------
+function resizeCanvas() {{
+
+    width =
+
+        window.innerWidth;
+
+
+    height =
+
+        document
+
+        .getElementById(
+
+            "app"
+
+        )
+
+        .clientHeight;
+
+
+    canvas.width =
+
+        width;
+
+
+    canvas.height =
+
+        height;
+
+}}
+
+
+window.addEventListener(
+
+    "resize",
+
+    resizeCanvas
+
+);
+
+
+resizeCanvas();
+
+
+// ============================================================
+// VIEW STATE
+// ============================================================
 
 let zoom = 1;
 
@@ -450,39 +860,23 @@ let offsetY = 0;
 
 let selected = null;
 
+let paused = false;
 
-// ---------------------------------------------------------
-// DATA
-// ---------------------------------------------------------
-
-const planets =
-
-{planets_json};
-
-const satellites =
-
-{satellites_json};
-
-const objects = [
-
-    ...planets,
-
-    ...satellites
-
-];
+let speed = 1;
 
 
-// ---------------------------------------------------------
-// STARS
-// ---------------------------------------------------------
+// ============================================================
+// STAR FIELD
+// ============================================================
 
-let stars = [];
+const stars = [];
+
 
 for (
 
     let i = 0;
 
-    i < 5000;
+    i < 3500;
 
     i++
 
@@ -496,20 +890,20 @@ for (
 
         size:
 
-            Math.random() * 2.5 + .3,
+            Math.random() * 1.7,
 
         brightness:
 
-            Math.random() * .8 + .2
+            Math.random()
 
     }});
 
 }}
 
 
-// ---------------------------------------------------------
-// COORDINATE CONVERSION
-// ---------------------------------------------------------
+// ============================================================
+// COORDINATE TRANSFORMATION
+// ============================================================
 
 function convert(
 
@@ -521,15 +915,17 @@ function convert(
 
     const cx =
 
-        width / 2 +
+        width / 2
 
-        offsetX;
+        + offsetX;
+
 
     const cy =
 
-        height / 2 +
+        height / 2
 
-        offsetY;
+        + offsetY;
+
 
     const radius =
 
@@ -541,64 +937,88 @@ function convert(
 
         )
 
-        * .38
+        * .40
 
         * zoom;
 
+
     const r =
 
-        radius *
+        radius
 
-        (90 - altitude)
+        * (
+
+            90
+
+            - altitude
+
+        )
 
         / 90;
 
+
     const angle =
 
-        (azimuth - 90)
+        (
 
-        *
+            azimuth
 
-        Math.PI
+            - 90
+
+        )
+
+        * Math.PI
 
         / 180;
+
 
     return {{
 
         x:
 
-            cx +
+            cx
 
-            r *
+            + r
 
-            Math.cos(angle),
+            * Math.cos(
+
+                angle
+
+            ),
 
         y:
 
-            cy +
+            cy
 
-            r *
+            + r
 
-            Math.sin(angle)
+            * Math.sin(
+
+                angle
+
+            )
 
     }};
 
 }}
 
 
-// ---------------------------------------------------------
-// DRAW STARS
-// ---------------------------------------------------------
+// ============================================================
+// STARS
+// ============================================================
 
-function drawStars(){{
+function drawStars() {{
 
     for (
 
-        let star of stars
+        const star
+
+        of stars
 
     ) {{
 
         ctx.beginPath();
+
 
         ctx.arc(
 
@@ -614,13 +1034,23 @@ function drawStars(){{
 
         );
 
+
         ctx.fillStyle =
 
             "rgba(255,255,255," +
 
-            star.brightness +
+            (
 
-            ")";
+                .2
+
+                + star.brightness
+
+                * .8
+
+            )
+
+            + ")";
+
 
         ctx.fill();
 
@@ -629,23 +1059,25 @@ function drawStars(){{
 }}
 
 
-// ---------------------------------------------------------
-// DRAW SKY GRID
-// ---------------------------------------------------------
+// ============================================================
+// SKY GRID
+// ============================================================
 
-function drawSky(){{
+function drawSky() {{
 
     const cx =
 
-        width / 2 +
+        width / 2
 
-        offsetX;
+        + offsetX;
+
 
     const cy =
 
-        height / 2 +
+        height / 2
 
-        offsetY;
+        + offsetY;
+
 
     const radius =
 
@@ -657,19 +1089,21 @@ function drawSky(){{
 
         )
 
-        * .38
+        * .40
 
         * zoom;
 
 
     ctx.strokeStyle =
 
-        "rgba(100,150,220,.35)";
+        "rgba(148,163,184,.25)";
+
 
     ctx.lineWidth = 1;
 
 
     ctx.beginPath();
+
 
     ctx.arc(
 
@@ -684,6 +1118,7 @@ function drawSky(){{
         Math.PI * 2
 
     );
+
 
     ctx.stroke();
 
@@ -700,14 +1135,21 @@ function drawSky(){{
 
         const r =
 
-            radius *
+            radius
 
-            (90 - altitude)
+            * (
+
+                90
+
+                - altitude
+
+            )
 
             / 90;
 
 
         ctx.beginPath();
+
 
         ctx.arc(
 
@@ -723,18 +1165,15 @@ function drawSky(){{
 
         );
 
+
         ctx.stroke();
 
     }}
 
 
-    ctx.fillStyle =
+    ctx.fillStyle = "white";
 
-        "white";
-
-    ctx.font =
-
-        "bold 18px Arial";
+    ctx.font = "bold 18px Arial";
 
 
     ctx.fillText(
@@ -747,6 +1186,7 @@ function drawSky(){{
 
     );
 
+
     ctx.fillText(
 
         "E",
@@ -757,6 +1197,7 @@ function drawSky(){{
 
     );
 
+
     ctx.fillText(
 
         "S",
@@ -766,6 +1207,7 @@ function drawSky(){{
         cy + radius + 25
 
     );
+
 
     ctx.fillText(
 
@@ -780,43 +1222,126 @@ function drawSky(){{
 }}
 
 
-// ---------------------------------------------------------
-// DRAW OBJECTS
-// ---------------------------------------------------------
+// ============================================================
+// ORBIT TRAILS
+// ============================================================
 
-function drawObjects(){{
+function drawOrbitTrails() {{
 
     for (
 
-        let object of objects
+        const orbit
+
+        of orbitTrails
 
     ) {{
 
-        let altitude =
-
-            Number(object.altitude);
-
-        let azimuth =
-
-            Number(object.azimuth);
-
-
         if (
 
-            isNaN(altitude)
-
-            ||
-
-            isNaN(azimuth)
+            orbit.trail.length < 2
 
         )
 
             continue;
 
 
+        ctx.beginPath();
+
+
+        let started = false;
+
+
+        for (
+
+            const point
+
+            of orbit.trail
+
+        ) {{
+
+            if (
+
+                point.altitude <= 0
+
+            )
+
+                continue;
+
+
+            const p =
+
+                convert(
+
+                    point.altitude,
+
+                    point.azimuth
+
+                );
+
+
+            if (!started) {{
+
+                ctx.moveTo(
+
+                    p.x,
+
+                    p.y
+
+                );
+
+                started = true;
+
+            }}
+
+            else {{
+
+                ctx.lineTo(
+
+                    p.x,
+
+                    p.y
+
+                );
+
+            }}
+
+        }}
+
+
+        ctx.strokeStyle =
+
+            "rgba(96,165,250,.25)";
+
+
+        ctx.lineWidth = 1;
+
+
+        ctx.stroke();
+
+    }}
+
+}}
+
+
+// ============================================================
+// OBJECTS
+// ============================================================
+
+function drawObjects() {{
+
+    for (
+
+        const object
+
+        of objects
+
+    ) {{
+
         if (
 
-            altitude <= 0
+            object.altitude
+
+            <= 0
 
         )
 
@@ -827,31 +1352,31 @@ function drawObjects(){{
 
             convert(
 
-                altitude,
+                object.altitude,
 
-                azimuth
+                object.azimuth
 
             );
 
 
         const isSelected =
 
-            selected &&
+            selected
 
-            selected.name ===
+            && selected.name
 
-            object.name;
+            === object.name;
 
 
         let size =
 
-            object.type ===
+            object.type
 
-            "Planet"
+            === "Planet"
 
-            ? 11
+            ? 10
 
-            : 5;
+            : 4;
 
 
         if (
@@ -860,10 +1385,11 @@ function drawObjects(){{
 
         )
 
-            size = 15;
+            size = 12;
 
 
         ctx.beginPath();
+
 
         ctx.arc(
 
@@ -882,11 +1408,11 @@ function drawObjects(){{
 
         ctx.fillStyle =
 
-            object.type ===
+            object.type
 
-            "Planet"
+            === "Planet"
 
-            ? "#ffffff"
+            ? "#facc15"
 
             : "#60a5fa";
 
@@ -895,18 +1421,18 @@ function drawObjects(){{
 
             isSelected
 
-            ? 35
+            ? 25
 
-            : 15;
+            : 8;
 
 
         ctx.shadowColor =
 
-            object.type ===
+            object.type
 
-            "Planet"
+            === "Planet"
 
-            ? "white"
+            ? "#facc15"
 
             : "#60a5fa";
 
@@ -919,13 +1445,11 @@ function drawObjects(){{
 
         if (
 
-            object.type ===
+            object.type
 
-            "Planet"
+            === "Planet"
 
-            ||
-
-            isSelected
+            || isSelected
 
         ) {{
 
@@ -933,15 +1457,17 @@ function drawObjects(){{
 
                 "white";
 
+
             ctx.font =
 
-                "13px Arial";
+                "12px Arial";
+
 
             ctx.fillText(
 
                 object.name,
 
-                p.x + 15,
+                p.x + 12,
 
                 p.y
 
@@ -954,15 +1480,16 @@ function drawObjects(){{
 }}
 
 
-// ---------------------------------------------------------
+// ============================================================
 // RENDER LOOP
-// ---------------------------------------------------------
+// ============================================================
 
-function render(){{
+function render() {{
 
     ctx.fillStyle =
 
         "#020617";
+
 
     ctx.fillRect(
 
@@ -979,7 +1506,12 @@ function render(){{
 
     drawStars();
 
+
     drawSky();
+
+
+    drawOrbitTrails();
+
 
     drawObjects();
 
@@ -993,51 +1525,114 @@ function render(){{
 }}
 
 
-// ---------------------------------------------------------
-// CLICK OBJECT
-// ---------------------------------------------------------
+render();
+
+
+// ============================================================
+// SEARCH
+// ============================================================
+
+document
+
+.getElementById(
+
+    "search"
+
+)
+
+.addEventListener(
+
+    "input",
+
+    function(event) {{
+
+        const query =
+
+            event.target.value
+
+            .toLowerCase();
+
+
+        if (
+
+            query.length === 0
+
+        ) {{
+
+            selected = null;
+
+            return;
+
+        }}
+
+
+        const result =
+
+            objects.find(
+
+                object =>
+
+                    object.name
+
+                    .toLowerCase()
+
+                    .includes(
+
+                        query
+
+                    )
+
+            );
+
+
+        if (
+
+            result
+
+        ) {{
+
+            selectObject(
+
+                result
+
+            );
+
+        }}
+
+    }}
+
+);
+
+
+// ============================================================
+// CLICK SELECT
+// ============================================================
 
 canvas.addEventListener(
 
     "click",
 
-    function(event){{
+    function(event) {{
 
-        let closest =
+        let closest = null;
 
-            null;
 
-        let closestDistance =
-
-            35;
+        let closestDistance = 30;
 
 
         for (
 
-            let object of objects
+            const object
+
+            of objects
 
         ) {{
 
-            const altitude =
-
-                Number(
-
-                    object.altitude
-
-                );
-
-            const azimuth =
-
-                Number(
-
-                    object.azimuth
-
-                );
-
-
             if (
 
-                altitude <= 0
+                object.altitude
+
+                <= 0
 
             )
 
@@ -1048,49 +1643,40 @@ canvas.addEventListener(
 
                 convert(
 
-                    altitude,
+                    object.altitude,
 
-                    azimuth
+                    object.azimuth
 
                 );
 
 
             const distance =
 
-                Math.sqrt(
+                Math.hypot(
 
-                    (
+                    event.clientX
 
-                        event.clientX -
+                    - p.x,
 
-                        p.x
+                    event.clientY
 
-                    ) ** 2
-
-                    +
-
-                    (
-
-                        event.clientY -
-
-                        p.y
-
-                    ) ** 2
+                    - p.y
 
                 );
 
 
             if (
 
-                distance <
+                distance
 
-                closestDistance
+                < closestDistance
 
             ) {{
 
                 closest =
 
                     object;
+
 
                 closestDistance =
 
@@ -1105,108 +1691,161 @@ canvas.addEventListener(
 
             closest
 
-        ) {{
+        )
 
-            selected =
+            selectObject(
 
-                closest;
+                closest
 
-
-            document.getElementById(
-
-                "info"
-
-            ).style.display =
-
-                "block";
-
-
-            document.getElementById(
-
-                "name"
-
-            ).innerText =
-
-                closest.name;
-
-
-            document.getElementById(
-
-                "type"
-
-            ).innerText =
-
-                closest.type;
-
-
-            document.getElementById(
-
-                "altitude"
-
-            ).innerText =
-
-                Number(
-
-                    closest.altitude
-
-                ).toFixed(3)
-
-                + "°";
-
-
-            document.getElementById(
-
-                "azimuth"
-
-            ).innerText =
-
-                Number(
-
-                    closest.azimuth
-
-                ).toFixed(3)
-
-                + "°";
-
-
-            document.getElementById(
-
-                "distance"
-
-            ).innerText =
-
-                Number(
-
-                    closest.distance
-
-                ).toFixed(2)
-
-                + " km";
-
-        }}
+            );
 
     }}
 
 );
 
 
-// ---------------------------------------------------------
+// ============================================================
+// INFORMATION PANEL
+// ============================================================
+
+function selectObject(
+
+    object
+
+) {{
+
+    selected = object;
+
+
+    document
+
+    .getElementById(
+
+        "info"
+
+    )
+
+    .style.display =
+
+        "block";
+
+
+    document
+
+    .getElementById(
+
+        "objectName"
+
+    )
+
+    .innerText =
+
+        object.name;
+
+
+    document
+
+    .getElementById(
+
+        "objectType"
+
+    )
+
+    .innerText =
+
+        object.type;
+
+
+    document
+
+    .getElementById(
+
+        "objectAltitude"
+
+    )
+
+    .innerText =
+
+        Number(
+
+            object.altitude
+
+        ).toFixed(
+
+            3
+
+        )
+
+        + "°";
+
+
+    document
+
+    .getElementById(
+
+        "objectAzimuth"
+
+    )
+
+    .innerText =
+
+        Number(
+
+            object.azimuth
+
+        ).toFixed(
+
+            3
+
+        )
+
+        + "°";
+
+
+    document
+
+    .getElementById(
+
+        "objectDistance"
+
+    )
+
+    .innerText =
+
+        Number(
+
+            object.distance
+
+        ).toFixed(
+
+            2
+
+        )
+
+        + " km";
+
+}}
+
+
+// ============================================================
 // ZOOM
-// ---------------------------------------------------------
+// ============================================================
 
-function zoomIn(){{
+function zoomIn() {{
 
-    zoom *= 1.3;
-
-}}
-
-function zoomOut(){{
-
-    zoom /= 1.3;
+    zoom *= 1.25;
 
 }}
 
-function resetView(){{
+
+function zoomOut() {{
+
+    zoom /= 1.25;
+
+}}
+
+
+function resetView() {{
 
     zoom = 1;
 
@@ -1217,9 +1856,9 @@ function resetView(){{
 }}
 
 
-// ---------------------------------------------------------
+// ============================================================
 // PAN
-// ---------------------------------------------------------
+// ============================================================
 
 let dragging = false;
 
@@ -1232,7 +1871,7 @@ canvas.addEventListener(
 
     "mousedown",
 
-    function(event){{
+    function(event) {{
 
         dragging = true;
 
@@ -1249,11 +1888,11 @@ canvas.addEventListener(
 );
 
 
-canvas.addEventListener(
+window.addEventListener(
 
     "mouseup",
 
-    function(){{
+    function() {{
 
         dragging = false;
 
@@ -1266,7 +1905,7 @@ canvas.addEventListener(
 
     "mousemove",
 
-    function(event){{
+    function(event) {{
 
         if (
 
@@ -1279,20 +1918,22 @@ canvas.addEventListener(
 
         offsetX +=
 
-            event.clientX -
+            event.clientX
 
-            lastX;
+            - lastX;
+
 
         offsetY +=
 
-            event.clientY -
+            event.clientY
 
-            lastY;
+            - lastY;
 
 
         lastX =
 
             event.clientX;
+
 
         lastY =
 
@@ -1303,38 +1944,118 @@ canvas.addEventListener(
 );
 
 
-// ---------------------------------------------------------
-// RESIZE
-// ---------------------------------------------------------
+// ============================================================
+// TIME
+// ============================================================
 
-window.addEventListener(
+let simulationTime =
 
-    "resize",
+    Date.now();
 
-    function(){{
 
-        width =
+function toggleTime() {{
 
-            window.innerWidth;
+    paused =
 
-        canvas.width =
+        !paused;
 
-            width;
+}}
 
-        canvas.height =
 
-            height;
+function changeSpeed(
 
-    }}
+    direction
+
+) {{
+
+    if (
+
+        direction
+
+        > 0
+
+    )
+
+        speed *= 2;
+
+
+    else
+
+        speed /= 2;
+
+
+    speed = Math.max(
+
+        .125,
+
+        Math.min(
+
+            speed,
+
+            64
+
+        )
+
+    );
+
+}}
+
+
+setInterval(
+
+    function() {{
+
+        if (
+
+            !paused
+
+        ) {{
+
+            simulationTime +=
+
+                1000
+
+                * speed;
+
+        }}
+
+
+        const date =
+
+            new Date(
+
+                simulationTime
+
+            );
+
+
+        document
+
+        .getElementById(
+
+            "clock"
+
+        )
+
+        .innerText =
+
+            date.toUTCString()
+
+            + " | "
+
+            + speed
+
+            + "×";
+
+    }},
+
+    1000
 
 );
 
 
-// START
-
-render();
-
 </script>
+
 
 </body>
 
@@ -1342,8 +2063,13 @@ render();
 
 """
 
-# ---------------------------------------------------------
-# RENDER WITH STREAMLIT
-# ---------------------------------------------------------
 
-st.html(app)
+display(
+
+    HTML(
+
+        app
+
+    )
+
+)
