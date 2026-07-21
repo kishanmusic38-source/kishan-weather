@@ -7,7 +7,7 @@ Original file is located at
     https://colab.research.google.com/notebooks/intro.ipynb
 """
 
-from IPython.display import HTML, display
+import streamlit as st
 import json
 
 # ---------------------------------------------------------
@@ -458,7 +458,7 @@ function drawSky() {{
 // DRAW OBJECTS
 // -------------------------------------
 
-function drawObjects() {{
+function drawObjects(){{
 
     for (
         let object of objects
@@ -831,6 +831,8 @@ canvas.addEventListener(
 </html>
 """
 
-display(
-    HTML(app)
-)
+# ---------------------------------------------------------
+# STREAMLIT DISPLAY
+# ---------------------------------------------------------
+
+st.html(app)
