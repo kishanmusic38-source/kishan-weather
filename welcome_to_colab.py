@@ -1,58 +1,15 @@
-# ============================================================
-# KISHANSKY — REAL-TIME ASTRONOMY OBSERVATORY
-# COLAB ONE-CELL VERSION
-# ============================================================
-
-# ------------------------------------------------------------
-# 1. INSTALL DEPENDENCIES
-# ------------------------------------------------------------
-
-import sys
-import subprocess
-
-packages = [
-    "streamlit",
-    "skyfield",
-    "sgp4",
-    "numpy",
-    "pandas",
-    "requests",
-    "plotly"
-]
-
-for package in packages:
-
-    subprocess.check_call(
-        [
-            sys.executable,
-            "-m",
-            "pip",
-            "install",
-            "-q",
-            package
-        ]
-    )
-
-
-# ------------------------------------------------------------
-# 2. WRITE APPLICATION
-# ------------------------------------------------------------
-
-app_code = r'''
 import streamlit as st
-import numpy as np
 import pandas as pd
+import numpy as np
 import requests
 import math
-import time
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
 from skyfield.api import load, EarthSatellite, wgs84
-from skyfield.data import hipparcos
 
 
 # ============================================================
-# PAGE CONFIGURATION
+# PAGE CONFIG
 # ============================================================
 
 st.set_page_config(
@@ -64,62 +21,48 @@ st.set_page_config(
 
 
 # ============================================================
-# CUSTOM INTERFACE
+# STYLE
 # ============================================================
 
-st.markdown(
-"""
+st.markdown("""
 <style>
-
-html, body, [class*="css"] {
-    font-family: Arial, sans-serif;
-}
 
 .stApp {
     background:
         radial-gradient(
-            circle at top,
-            #101d3a 0%,
-            #050914 45%,
+            ellipse at top,
+            #17284a 0%,
+            #070b17 45%,
             #020308 100%
         );
-    color: white;
 }
 
-section[data-testid="stSidebar"] {
-    background:
-        linear-gradient(
-            180deg,
-            #070c19,
-            #02040a
-        );
-    border-right: 1px solid #1c3857;
+[data-testid="stSidebar"] {
+    background-color: #050914;
 }
 
 h1 {
-    color: #76ddff;
-    letter-spacing: 3px;
+    color: #79e6ff;
+    letter-spacing: 4px;
 }
 
 h2, h3 {
-    color: #a8eaff;
+    color: #b5edff;
 }
 
-div[data-testid="stMetric"] {
-    background: rgba(20, 40, 70, 0.35);
-    border: 1px solid #25476b;
+[data-testid="stMetric"] {
+    background: rgba(20, 45, 75, 0.35);
+    border: 1px solid #24496c;
     border-radius: 12px;
-    padding: 10px;
+    padding: 12px;
 }
 
 </style>
-""",
-    unsafe_allow_html=True
-)
+""", unsafe_allow_html=True)
 
 
 # ============================================================
-# TITLE
+# HEADER
 # ============================================================
 
 st.title("🌌 KISHANSKY")
@@ -130,198 +73,76 @@ st.caption(
 
 
 # ============================================================
-# SESSION STATE
-# ============================================================
-
-if "simulation_time" not in st.session_state:
-
-    st.session_state.simulation_time = datetime.now(
-        timezone.utc
-    )
-
-if "satellites" not in st.session_state:
-
-    st.session_state.satellites = None
-
-if "stars" not in st.session_state:
-
-    st.session_state.stars = None
-
-
-# ============================================================
-# SIDEBAR
-# ============================================================
-
-st.sidebar.title("⚙️ OBSERVATORY CONTROL")
-
-
-# ------------------------------------------------------------
-# LOCATION
-# ------------------------------------------------------------
-
-st.sidebar.subheader("📍 Observer Location")
-
-latitude = st.sidebar.number_input(
-    "Latitude",
-    value=41.7508,
-    min_value=-90.0,
-    max_value=90.0
-)
-
-longitude = st.sidebar.number_input(
-    "Longitude",
-    value=-88.1535,
-    min_value=-180.0,
-    max_value=180.0
-)
-
-elevation = st.sidebar.number_input(
-    "Elevation (meters)",
-    value=210.0,
-    min_value=-500.0,
-    max_value=10000.0
-)
-
-
-# ------------------------------------------------------------
-# TIME CONTROL
-# ------------------------------------------------------------
-
-st.sidebar.subheader("⏱ Time Control")
-
-time_speed = st.sidebar.select_slider(
-    "Time Speed",
-    options=[
-        0,
-        1,
-        10,
-        60,
-        600,
-        3600,
-        86400
-    ],
-    value=1,
-    format_func=lambda x: (
-        "PAUSED"
-        if x == 0
-        else f"{x}×"
-    )
-)
-
-
-# ------------------------------------------------------------
-# FOV
-# ------------------------------------------------------------
-
-st.sidebar.subheader("🔭 Sky View")
-
-fov = st.sidebar.slider(
-    "Field of View",
-    20,
-    180,
-    100
-)
-
-
-# ============================================================
-# LOAD ASTRONOMICAL DATA
+# LOAD SKYFIELD DATA
 # ============================================================
 
 @st.cache_resource
-def load_ephemeris():
+def load_astronomy():
 
     ts = load.timescale()
 
-    eph = load(
-        "de421.bsp"
-    )
+    eph = load("de421.bsp")
 
     return ts, eph
 
 
-@st.cache_data
-def load_stars():
-
-    try:
-
-        with load.open(
-            "hip_main.dat"
-        ) as f:
-
-            stars = hipparcos.load_dataframe(
-                f
-            )
-
-    except Exception:
-
-        stars = load(
-            "hip_main.dat"
-        )
-
-    stars = stars[
-        stars["magnitude"] <= 6.5
-    ]
-
-    stars = stars[
-        [
-            "ra_degrees",
-            "dec_degrees",
-            "magnitude"
-        ]
-    ]
-
-    return stars
-
-
-# ============================================================
-# LOAD EPHEMERIS
-# ============================================================
-
 try:
 
-    ts, eph = load_ephemeris()
+    ts, eph = load_astronomy()
 
 except Exception as error:
 
     st.error(
-        f"Could not load planetary ephemeris: {error}"
+        f"Unable to load astronomy engine: {error}"
     )
 
     st.stop()
 
 
 # ============================================================
-# LOAD STARS
+# SIDEBAR
 # ============================================================
 
-try:
+st.sidebar.header("🔭 OBSERVATORY")
 
-    stars = load_stars()
+st.sidebar.subheader("📍 Observer Location")
 
-except Exception as error:
+latitude = st.sidebar.number_input(
+    "Latitude",
+    min_value=-90.0,
+    max_value=90.0,
+    value=41.7508,
+    step=0.0001
+)
 
-    st.warning(
-        f"Star catalog unavailable: {error}"
-    )
+longitude = st.sidebar.number_input(
+    "Longitude",
+    min_value=-180.0,
+    max_value=180.0,
+    value=-88.1535,
+    step=0.0001
+)
 
-    stars = pd.DataFrame()
-
-
-# ============================================================
-# CURRENT SIMULATION TIME
-# ============================================================
-
-if time_speed > 0:
-
-    st.session_state.simulation_time += timedelta(
-        seconds=time_speed
-    )
+elevation = st.sidebar.number_input(
+    "Elevation (m)",
+    min_value=-500.0,
+    max_value=10000.0,
+    value=210.0
+)
 
 
-current_time = st.session_state.simulation_time
+st.sidebar.subheader("⏱ TIME")
 
-t = ts.from_datetime(
-    current_time
+simulation_time = st.sidebar.datetime_input(
+    "Observation Time",
+    value=datetime.now()
+)
+
+
+st.sidebar.subheader("🔎 SEARCH")
+
+search = st.sidebar.text_input(
+    "Search planets or satellites"
 )
 
 
@@ -337,10 +158,7 @@ observer = wgs84.latlon(
 
 earth = eph["earth"]
 
-observer_position = (
-    earth
-    + observer
-)
+observer_position = earth + observer
 
 
 # ============================================================
@@ -350,28 +168,44 @@ observer_position = (
 bodies = {
 
     "Sun": eph["sun"],
+
     "Moon": eph["moon"],
+
     "Mercury": eph["mercury"],
+
     "Venus": eph["venus"],
+
     "Mars": eph["mars"],
+
     "Jupiter": eph["jupiter barycenter"],
+
     "Saturn": eph["saturn barycenter"],
+
     "Uranus": eph["uranus barycenter"],
+
     "Neptune": eph["neptune barycenter"]
+
 }
 
 
-planet_positions = []
+t = ts.from_datetime(
+    simulation_time.replace(
+        tzinfo=timezone.utc
+    )
+)
+
+
+planet_rows = []
 
 
 for name, body in bodies.items():
 
     try:
 
-        astrometric = observer_position.at(
-            t
-        ).observe(
-            body
+        astrometric = (
+            observer_position
+            .at(t)
+            .observe(body)
         )
 
         apparent = astrometric.apparent()
@@ -380,34 +214,35 @@ for name, body in bodies.items():
             apparent.altaz()
         )
 
-        planet_positions.append(
+        planet_rows.append({
 
-            {
-                "Object": name,
-                "Type": "Planetary Body",
-                "Azimuth": round(
-                    azimuth.degrees,
-                    3
-                ),
-                "Altitude": round(
-                    altitude.degrees,
-                    3
-                ),
-                "Distance (km)": round(
-                    distance.km,
-                    0
-                )
-            }
+            "Object": name,
 
-        )
+            "Type": "Solar System",
+
+            "Azimuth (°)": round(
+                azimuth.degrees,
+                2
+            ),
+
+            "Altitude (°)": round(
+                altitude.degrees,
+                2
+            ),
+
+            "Distance (km)": round(
+                distance.km
+            )
+
+        })
 
     except Exception:
 
-        pass
+        continue
 
 
 planet_df = pd.DataFrame(
-    planet_positions
+    planet_rows
 )
 
 
@@ -415,10 +250,8 @@ planet_df = pd.DataFrame(
 # REAL SATELLITE DATA
 # ============================================================
 
-@st.cache_data(
-    ttl=3600
-)
-def download_satellites():
+@st.cache_data(ttl=3600)
+def get_satellite_tles():
 
     url = (
         "https://celestrak.org/NORAD/elements/gp.php"
@@ -437,9 +270,11 @@ def download_satellites():
 
     satellites = []
 
-    i = 0
-
-    while i + 2 < len(lines):
+    for i in range(
+        0,
+        len(lines) - 2,
+        3
+    ):
 
         name = lines[i].strip()
 
@@ -452,101 +287,101 @@ def download_satellites():
             and line2.startswith("2 ")
         ):
 
-            satellites.append(
+            satellites.append({
 
-                {
-                    "name": name,
-                    "line1": line1,
-                    "line2": line2
-                }
+                "name": name,
 
-            )
+                "line1": line1,
 
-        i += 3
+                "line2": line2
+
+            })
 
     return satellites
 
 
 try:
 
-    satellite_data = download_satellites()
+    tle_data = get_satellite_tles()
 
 except Exception as error:
 
-    satellite_data = []
-
     st.warning(
-        f"Satellite data temporarily unavailable: {error}"
+        f"Satellite data unavailable: {error}"
     )
 
+    tle_data = []
+
 
 # ============================================================
-# SATELLITE PROPAGATION
+# PROPAGATE SATELLITES
 # ============================================================
 
-satellite_positions = []
+satellite_rows = []
 
 
-for sat_data in satellite_data[:1000]:
+for data in tle_data:
 
     try:
 
         satellite = EarthSatellite(
-            sat_data["line1"],
-            sat_data["line2"],
-            sat_data["name"],
+
+            data["line1"],
+
+            data["line2"],
+
+            data["name"],
+
             ts
+
         )
 
-        geocentric = satellite.at(
-            t
-        )
+        difference = satellite - observer
 
-        subpoint = wgs84.subpoint(
-            geocentric
-        )
-
-        difference = (
-            satellite
-            - observer
-        )
-
-        topocentric = difference.at(
-            t
-        )
+        topocentric = difference.at(t)
 
         altitude, azimuth, distance = (
             topocentric.altaz()
         )
 
-        satellite_positions.append(
+        geocentric = satellite.at(t)
 
-            {
-                "Object": sat_data["name"],
-                "Type": "Satellite",
-                "Azimuth": round(
-                    azimuth.degrees,
-                    3
-                ),
-                "Altitude": round(
-                    altitude.degrees,
-                    3
-                ),
-                "Distance (km)": round(
-                    distance.km,
-                    3
-                ),
-                "Latitude": round(
-                    subpoint.latitude.degrees,
-                    4
-                ),
-                "Longitude": round(
-                    subpoint.longitude.degrees,
-                    4
-                )
-            }
-
+        subpoint = wgs84.subpoint(
+            geocentric
         )
+
+        satellite_rows.append({
+
+            "Object": data["name"],
+
+            "Type": "Satellite",
+
+            "Azimuth (°)": round(
+                azimuth.degrees,
+                2
+            ),
+
+            "Altitude (°)": round(
+                altitude.degrees,
+                2
+            ),
+
+            "Distance (km)": round(
+                distance.km,
+                2
+            ),
+
+            "Latitude": round(
+                subpoint.latitude.degrees,
+                4
+            ),
+
+            "Longitude": round(
+                subpoint.longitude.degrees,
+                4
+            )
+
+        })
 
     except Exception:
 
@@ -554,71 +389,60 @@ for sat_data in satellite_data[:1000]:
 
 
 satellite_df = pd.DataFrame(
-    satellite_positions
+    satellite_rows
 )
 
 
 # ============================================================
-# SEARCH
+# METRICS
 # ============================================================
 
-st.sidebar.subheader("🔎 Search")
-
-search = st.sidebar.text_input(
-    "Search for an object"
-)
+a, b, c, d = st.columns(4)
 
 
-# ============================================================
-# MAIN METRICS
-# ============================================================
-
-col1, col2, col3, col4 = st.columns(4)
-
-
-with col1:
+with a:
 
     st.metric(
-        "Catalog Stars",
-        f"{len(stars):,}"
+        "🌟 Active Stars System",
+        "HIPPARCOS"
     )
 
 
-with col2:
+with b:
 
     st.metric(
-        "Active Satellites",
+        "🛰 Satellites",
         f"{len(satellite_df):,}"
     )
 
 
-with col3:
+with c:
 
     st.metric(
-        "Planets / Bodies",
+        "🪐 Solar System Objects",
         len(planet_df)
     )
 
 
-with col4:
+with d:
 
     st.metric(
-        "UTC Time",
-        current_time.strftime(
+        "🕒 UTC",
+        simulation_time.strftime(
             "%H:%M:%S"
         )
     )
 
 
 # ============================================================
-# SEARCH RESULTS
+# SEARCH
 # ============================================================
 
 if search:
 
     search_lower = search.lower()
 
-    planet_matches = planet_df[
+    planet_results = planet_df[
         planet_df["Object"]
         .str.lower()
         .str.contains(
@@ -626,7 +450,7 @@ if search:
         )
     ]
 
-    satellite_matches = satellite_df[
+    satellite_results = satellite_df[
         satellite_df["Object"]
         .str.lower()
         .str.contains(
@@ -635,26 +459,28 @@ if search:
         )
     ]
 
-    if len(planet_matches) > 0:
+    if len(planet_results) > 0:
 
         st.subheader(
-            "🪐 Planetary Search Result"
+            "🔍 Planet Search Result"
         )
 
         st.dataframe(
-            planet_matches,
-            use_container_width=True
+            planet_results,
+            use_container_width=True,
+            hide_index=True
         )
 
-    elif len(satellite_matches) > 0:
+    elif len(satellite_results) > 0:
 
         st.subheader(
-            "🛰 Satellite Search Result"
+            "🔍 Satellite Search Result"
         )
 
         st.dataframe(
-            satellite_matches.head(50),
-            use_container_width=True
+            satellite_results.head(100),
+            use_container_width=True,
+            hide_index=True
         )
 
     else:
@@ -665,11 +491,11 @@ if search:
 
 
 # ============================================================
-# PLANETS
+# PLANETARY DATA
 # ============================================================
 
 st.subheader(
-    "🪐 Real-Time Planetary Positions"
+    "🪐 Real-Time Solar System"
 )
 
 st.dataframe(
@@ -680,313 +506,170 @@ st.dataframe(
 
 
 # ============================================================
-# SATELLITES
+# SATELLITE DATA
 # ============================================================
 
 st.subheader(
     "🛰 Real-Time Satellite Tracking"
 )
 
-if len(satellite_df) > 0:
+visible_satellites = satellite_df[
+    satellite_df["Altitude (°)"] > 0
+]
 
-    visible_satellites = satellite_df[
-        satellite_df["Altitude"] > 0
-    ]
+st.write(
+    f"Satellites above your horizon: "
+    f"{len(visible_satellites):,}"
+)
 
-    st.write(
-        f"Visible above horizon: "
-        f"{len(visible_satellites):,}"
-    )
-
-    st.dataframe(
-        visible_satellites.head(100),
-        use_container_width=True,
-        hide_index=True
-    )
-
-else:
-
-    st.warning(
-        "No satellite data currently available."
-    )
+st.dataframe(
+    visible_satellites.head(100),
+    use_container_width=True,
+    hide_index=True
+)
 
 
 # ============================================================
-# SKY MAP
+# VISUAL SKY MAP
 # ============================================================
 
 st.subheader(
-    "🌌 Live Sky Map"
+    "🌌 Interactive Sky Map"
 )
 
-try:
+import plotly.graph_objects as go
 
-    import plotly.graph_objects as go
 
-    fig = go.Figure()
-
-    # --------------------------------------------------------
-    # STARS
-    # --------------------------------------------------------
-
-    if len(stars) > 0:
-
-        star_sample = stars.head(
-            5000
-        )
-
-        fig.add_trace(
-
-            go.Scattergl(
-
-                x=star_sample[
-                    "ra_degrees"
-                ],
-
-                y=star_sample[
-                    "dec_degrees"
-                ],
-
-                mode="markers",
-
-                marker=dict(
-
-                    size=np.maximum(
-
-                        1,
-
-                        7
-                        - star_sample[
-                            "magnitude"
-                        ].values
-
-                    ),
-
-                    opacity=0.8
-
-                ),
-
-                name="Stars"
-
-            )
-
-        )
-
-
-    # --------------------------------------------------------
-    # PLANETS
-    # --------------------------------------------------------
-
-    if len(planet_df) > 0:
-
-        fig.add_trace(
-
-            go.Scatter(
-
-                x=planet_df[
-                    "Azimuth"
-                ],
-
-                y=planet_df[
-                    "Altitude"
-                ],
-
-                mode="markers+text",
-
-                text=planet_df[
-                    "Object"
-                ],
-
-                textposition="top center",
-
-                marker=dict(
-                    size=12
-                ),
-
-                name="Planets"
-
-            )
-
-        )
-
-
-    # --------------------------------------------------------
-    # SATELLITES
-    # --------------------------------------------------------
-
-    visible = satellite_df[
-        satellite_df[
-            "Altitude"
-        ] > 0
-    ].head(
-        300
-    )
-
-    if len(visible) > 0:
-
-        fig.add_trace(
-
-            go.Scattergl(
-
-                x=visible[
-                    "Azimuth"
-                ],
-
-                y=visible[
-                    "Altitude"
-                ],
-
-                mode="markers",
-
-                marker=dict(
-                    size=5
-                ),
-
-                name="Satellites"
-
-            )
-
-        )
-
-
-    fig.update_layout(
-
-        height=650,
-
-        paper_bgcolor="#020308",
-
-        plot_bgcolor="#020308",
-
-        font=dict(
-            color="white"
-        ),
-
-        xaxis=dict(
-            title="Azimuth / Right Ascension",
-            gridcolor="#1d334e"
-        ),
-
-        yaxis=dict(
-            title="Altitude / Declination",
-            gridcolor="#1d334e"
-        ),
-
-        legend=dict(
-            bgcolor="#050914"
-        )
-
-    )
-
-    st.plotly_chart(
-        fig,
-        use_container_width=True
-    )
-
-except Exception as error:
-
-    st.error(
-        f"Sky visualization error: {error}"
-    )
-
-
-# ============================================================
-# DATA TABLE
-# ============================================================
-
-with st.expander(
-    "📊 Complete Planetary Data"
-):
-
-    st.dataframe(
-        planet_df,
-        use_container_width=True
-    )
-
-
-with st.expander(
-    "📡 Satellite Data"
-):
-
-    st.dataframe(
-        satellite_df.head(1000),
-        use_container_width=True
-    )
-
-
-# ============================================================
-# AUTO REFRESH
-# ============================================================
-
-time.sleep(
-    1
-)
-
-st.rerun()
-'''
+fig = go.Figure()
 
 
 # ------------------------------------------------------------
-# 3. SAVE APP
+# PLANETS
 # ------------------------------------------------------------
 
-with open(
-    "KishanSky.py",
-    "w",
-    encoding="utf-8"
-) as file:
+if len(planet_df) > 0:
 
-    file.write(
-        app_code
+    fig.add_trace(
+
+        go.Scatter(
+
+            x=planet_df[
+                "Azimuth (°)"
+            ],
+
+            y=planet_df[
+                "Altitude (°)"
+            ],
+
+            mode="markers+text",
+
+            text=planet_df[
+                "Object"
+            ],
+
+            textposition="top center",
+
+            marker=dict(
+                size=15
+            ),
+
+            name="Planets"
+
+        )
+
     )
 
 
 # ------------------------------------------------------------
-# 4. START STREAMLIT
+# SATELLITES
 # ------------------------------------------------------------
 
-import os
-import subprocess
-import time
+if len(visible_satellites) > 0:
 
-# Stop previous Streamlit servers
-os.system(
-    "pkill -f 'streamlit run' || true"
+    satellite_sample = (
+        visible_satellites
+        .head(500)
+    )
+
+    fig.add_trace(
+
+        go.Scattergl(
+
+            x=satellite_sample[
+                "Azimuth (°)"
+            ],
+
+            y=satellite_sample[
+                "Altitude (°)"
+            ],
+
+            mode="markers",
+
+            marker=dict(
+                size=5
+            ),
+
+            name="Satellites"
+
+        )
+
+    )
+
+
+fig.update_layout(
+
+    height=700,
+
+    paper_bgcolor="#020308",
+
+    plot_bgcolor="#020308",
+
+    font=dict(
+        color="white"
+    ),
+
+    xaxis=dict(
+
+        title="Azimuth (degrees)",
+
+        range=[0, 360],
+
+        gridcolor="#18304b"
+
+    ),
+
+    yaxis=dict(
+
+        title="Altitude (degrees)",
+
+        range=[0, 90],
+
+        gridcolor="#18304b"
+
+    ),
+
+    legend=dict(
+
+        bgcolor="#050914"
+
+    )
+
 )
 
-time.sleep(
-    2
+
+st.plotly_chart(
+    fig,
+    use_container_width=True
 )
 
-process = subprocess.Popen(
 
-    [
-        sys.executable,
-        "-m",
-        "streamlit",
-        "run",
-        "KishanSky.py",
-        "--server.port",
-        "8501",
-        "--server.address",
-        "0.0.0.0",
-        "--server.headless",
-        "true",
-        "--browser.gatherUsageStats",
-        "false"
-    ],
+# ============================================================
+# FOOTER
+# ============================================================
 
-    stdout=subprocess.PIPE,
-    stderr=subprocess.STDOUT
-)
+st.divider()
 
-print(
-    "KishanSky is starting..."
-)
-
-time.sleep(
-    8
-)
-
-print(
-    "Open the Streamlit preview or Colab port 8501."
+st.caption(
+    "KishanSky • Real satellite orbital propagation using current TLE data • "
+    "Planetary calculations using Skyfield ephemerides • Built by Kishan"
 )
